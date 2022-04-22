@@ -90,6 +90,14 @@ func RedefinePodWithNetwork(pod *corev1.Pod, networksSpec string) *corev1.Pod {
 	return pod
 }
 
+func RedefineWithLabel(pod *corev1.Pod, key, value string) *corev1.Pod {
+	if pod.ObjectMeta.Labels == nil {
+		pod.ObjectMeta.Labels = map[string]string{}
+	}
+	pod.ObjectMeta.Labels[key] = value
+	return pod
+}
+
 // RedefineAsPrivileged updates the pod definition to be privileged
 func RedefineAsPrivileged(pod *corev1.Pod, containerName string) (*corev1.Pod, error) {
 	c := containerByName(pod, containerName)
