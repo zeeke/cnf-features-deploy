@@ -3,6 +3,8 @@ package multinetworkpolicy
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -10,7 +12,7 @@ import (
 	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/types"
 
-	multinetpolicyv1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
+	multinetpolicyv1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	sriovClean "github.com/k8snetworkplumbingwg/sriov-network-operator/test/util/clean"
 	sriovtestclient "github.com/k8snetworkplumbingwg/sriov-network-operator/test/util/client"
@@ -20,39 +22,43 @@ import (
 	sriovNetwork "github.com/k8snetworkplumbingwg/sriov-network-operator/test/util/network"
 	client "github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/client"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/discovery"
-	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/execute"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/namespaces"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/nodes"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/pods"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/sriov"
 	corev1 "k8s.io/api/core/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	resourceName = "sriovnic-multi-networkpolicy-resource"
+	resourceName = "sriovnicMultiNetworkpolicyResource"
 	testNetwork  = "test-multi-networkpolicy-sriov-network"
 )
 
 var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	sriovclient := sriovtestclient.New("")
-	sriovclient := multi.New("")
 	var nodesList []string
 
-	execute.BeforeAll(func() {
+	BeforeEach(func() {
+
 		if discovery.Enabled() {
 			Skip("Discovery is not supported.")
 		}
 
-		err := sriovClean.All()
+		err := namespaces.CleanPods(sriovNamespaces.Test, client.Client)
+		Expect(err).ToNot(HaveOccurred())
+
+		err = sriovClean.All()
 		Expect(err).ToNot(HaveOccurred())
 		sriov.WaitStable(sriovclient)
-		err = namespaces.Create(sriovNamespaces.Test, client.Client)
 
+		err = namespaces.Create(sriovNamespaces.Test, client.Client)
 		Expect(err).ToNot(HaveOccurred())
+
 		sriovInfos, err := sriovcluster.DiscoverSriov(sriovclient, namespaces.SRIOVOperator)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(sriovInfos).ToNot(BeNil())
@@ -90,13 +96,10 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	})
 
 	AfterEach(func() {
-		err := namespaces.CleanPods(sriovNamespaces.Test, client.Client)
-		Expect(err).ToNot(HaveOccurred())
+		// TODO clean up
 
-		err = sriovClean.All()
-		Expect(err).ToNot(HaveOccurred())
-
-		sriov.WaitStable(sriovclient)
+		// fmt.Println("Press the Enter Key to continue")
+		// fmt.Scanln()
 	})
 
 	Context("", func() {
@@ -104,16 +107,16 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 			podA := pods.DefinePod(sriovNamespaces.Test)
 			pods.RedefineWithLabel(podA, "app", "A")
-			podA, err := client.Client.Pods(sriovNamespaces.Test).
-				Create(context.Background(), podA, metav1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred())
+			pods.RedefinePodWithNetwork(podA, testNetwork)
+			redefineWithNetcatServer(podA)
+			podA = createAndStartPod(podA)
 
 			podB := pods.DefinePod(sriovNamespaces.Test)
-			podB, err = client.Client.Pods(sriovNamespaces.Test).
-				Create(context.Background(), podB, metav1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred())
+			pods.RedefinePodWithNetwork(podB, testNetwork)
+			redefineWithNetcatServer(podB)
+			podB = createAndStartPod(podB)
 
-			Eventually(podB).Should(BeAbleToSendTrafficTo(podA))
+			Eventually(podB, "30s", "1s").Should(BeAbleToSendTrafficTo(podA))
 
 			multiNetPolicy := defineMultiNetworkPolicy(sriovclient, testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -128,10 +131,11 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				},
 			}
 
-			multiNetPolicy, err = client.Client.MultiNetworkPolicies(sriovNamespaces.Test).
+			_, err := client.Client.MultiNetworkPolicies(sriovNamespaces.Test).
 				Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
+			Expect(err).ToNot(HaveOccurred())
 
-			Eventually(podB).ShouldNot(BeAbleToSendTrafficTo(podA))
+			Eventually(podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(podA))
 		})
 	})
 })
@@ -140,10 +144,12 @@ func waitForObject(clientSet *sriovtestclient.ClientSet, key runtimeclient.Objec
 
 	Eventually(func() error {
 		return clientSet.Get(context.Background(), key, object)
-	}, 60*time.Second, 1*time.Second).ShouldNot(
-		HaveOccurred(),
-		"Object [%s] not found for key [%s]", object.GetObjectKind().GroupVersionKind().Kind, key,
-	)
+	}, 120*time.Second, 1*time.Second).
+		WithOffset(1).
+		ShouldNot(
+			HaveOccurred(),
+			"Object [%s] not found for key [%s]", reflect.TypeOf(object), key,
+		)
 }
 
 func defineMultiNetworkPolicy(clientSet *sriovtestclient.ClientSet, targetNetwork string) *multinetpolicyv1.MultiNetworkPolicy {
@@ -158,6 +164,25 @@ func defineMultiNetworkPolicy(clientSet *sriovtestclient.ClientSet, targetNetwor
 	}
 
 	return &ret
+}
+
+func redefineWithNetcatServer(pod *corev1.Pod) *corev1.Pod {
+	pod.Spec.Containers[0].Command = []string{"bash", "-c", "while true; do nc -l 0.0.0.0 5555; done"}
+	return pod
+}
+
+func createAndStartPod(pod *corev1.Pod) *corev1.Pod {
+	res, err := client.Client.Pods(pod.Namespace).
+		Create(context.Background(), pod, metav1.CreateOptions{})
+	Expect(err).ToNot(HaveOccurred())
+
+	Eventually(func() (corev1.PodPhase, error) {
+		res, err = client.Client.Pods(res.Namespace).Get(context.Background(), res.Name, metav1.GetOptions{})
+		Expect(err).ToNot(HaveOccurred(), "Error while creating")
+		return res.Status.Phase, err
+	}, 1*time.Minute, 10*time.Second).Should(Equal(corev1.PodRunning))
+
+	return res
 }
 
 type TrafficMatcherFactory struct {
@@ -190,18 +215,21 @@ func (m *SendTrafficToMatcher) Match(actual interface{}) (bool, error) {
 	}
 
 	destinationIps, err := network.GetSriovNicIPs(m.destinationPod, "net1")
-	if err != nil || len(destinationIps) == 0 {
+	if err != nil {
 		return false, fmt.Errorf("can't determine destination pod [%s] SR-IOV ip address: %w ", m.destinationPod.Name, err)
 	}
 
-	_, err = pods.ExecCommand(client.Client, *m.destinationPod, []string{"nc", "-l", destinationIps[0], "5555"})
-	if err != nil {
-		return false, fmt.Errorf("can't open port on destination pod [%s]: %w ", m.destinationPod.Name, err)
+	if len(destinationIps) == 0 {
+		return false, fmt.Errorf("no ip address found for destination pod [%s] SR-IOV ip address: %w ", m.destinationPod.Name, err)
 	}
 
-	_, err = pods.ExecCommand(client.Client, *sourcePod, []string{"nc", "-l", destinationIps[0], "5555"})
+	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s 5555", destinationIps[0])})
 	if err != nil {
-		return false, fmt.Errorf("can't connect pods [%s] -> [%s]: %w ", sourcePod, m.destinationPod.Name, err)
+		if strings.Contains(output.String(), "Ncat: Connection timed out") {
+			// Return err == nil to allow assertion on connectivity absence
+			return false, nil
+		}
+		return false, fmt.Errorf("can't connect pods [%s] -> [%s]: %w ", sourcePod.Name, m.destinationPod.Name, err)
 	}
 
 	return true, nil

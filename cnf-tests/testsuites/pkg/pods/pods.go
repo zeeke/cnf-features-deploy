@@ -252,7 +252,7 @@ func ExecCommand(cs *testclient.ClientSet, pod corev1.Pod, command []string) (by
 		Tty:    true,
 	})
 	if err != nil {
-		return buf, fmt.Errorf("remove command %v error %w", command, err)
+		return buf, fmt.Errorf("remote command %v error [%w]. output [%s]", command, err, buf.String())
 	}
 
 	return buf, nil

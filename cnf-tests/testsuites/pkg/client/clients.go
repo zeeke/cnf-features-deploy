@@ -5,8 +5,8 @@ import (
 
 	gkopv1alpha "github.com/gatekeeper/gatekeeper-operator/api/v1alpha1"
 	"github.com/golang/glog"
-	multinetpolicyapiv1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta2"
-	multinetpolicyclientv1beta2 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta2"
+	multinetpolicyapiv1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	multinetpolicyclientv1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
 	sriovk8sv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	sriovv1 "github.com/k8snetworkplumbingwg/sriov-network-operator/api/v1"
 	constraints "github.com/open-policy-agent/frameworks/constraint/pkg/apis/templates/v1beta1"
@@ -61,7 +61,7 @@ type ClientSet struct {
 	ptpv1.PtpV1Interface
 	imagev1client.ImageV1Interface
 	buildv1client.BuildV1Interface
-	multinetpolicyclientv1beta2.K8sCniCncfIoV1beta2Interface
+	multinetpolicyclientv1.K8sCniCncfIoV1beta1Interface
 	Config *rest.Config
 }
 
@@ -97,6 +97,7 @@ func New(kubeconfig string) *ClientSet {
 	clientSet.PtpV1Interface = ptpv1.NewForConfigOrDie(config)
 	clientSet.ImageV1Interface = imagev1client.NewForConfigOrDie(config)
 	clientSet.BuildV1Interface = buildv1client.NewForConfigOrDie(config)
+	clientSet.K8sCniCncfIoV1beta1Interface = multinetpolicyclientv1.NewForConfigOrDie(config)
 	clientSet.Config = config
 
 	myScheme := runtime.NewScheme()
@@ -173,7 +174,7 @@ func New(kubeconfig string) *ClientSet {
 		panic(err)
 	}
 
-	if err := multinetpolicyapiv1beta2.AddToScheme(myScheme); err != nil {
+	if err := multinetpolicyapiv1.AddToScheme(myScheme); err != nil {
 		panic(err)
 	}
 
