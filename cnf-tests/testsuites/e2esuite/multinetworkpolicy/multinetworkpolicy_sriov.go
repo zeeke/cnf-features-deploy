@@ -115,7 +115,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	})
 
 	BeforeEach(func() {
-		cleanMultiNetworkPolicies(sriovNamespaces.Test)
+		cleanMultiNetworkPolicies(nsX)
+		cleanMultiNetworkPolicies(nsY)
+		cleanMultiNetworkPolicies(nsZ)
 	})
 
 	AfterEach(func() {
@@ -132,7 +134,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	})
 
 	Context("", func() {
-		It("DENY all traffic to an application", func() {
+		It("DENY all traffic to a pod", func() {
 
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -157,6 +159,44 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			// Pod A should not be reacheable by B and C
 			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
 			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+
+			// nsX_podA should be able to send traffic to
+			// Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+		})
+
+		FIt("DENY all traffic to/from/in a namespace", func() {
+
+			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+					multinetpolicyv1.PolicyTypeIngress,
+				},
+				Ingress:     []multinetpolicyv1.MultiNetworkPolicyIngressRule{},
+				Egress:      []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
+				PodSelector: metav1.LabelSelector{},
+			}
+
+			_, err := client.Client.MultiNetworkPolicies(nsX).
+				Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Traffic within nsX is not allowed
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
+			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+
+			// Traffic to/from nsX is not allowed
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
+
+			// Traffic within other namespaces is allowed
+			Eventually(nsY_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
+			Eventually(nsZ_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
+
+			// Traffic between other namespaces is allowed
+			Eventually(nsY_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podA))
+			Eventually(nsZ_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+
 		})
 	})
 })
