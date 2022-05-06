@@ -95,14 +95,14 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		         		}]
 		       	}`
 
-		err = sriovNetwork.CreateSriovNetwork(sriovclient, sriovDevice, testNetwork, namespaces.SRIOVOperator,
+		err = sriovNetwork.CreateSriovNetwork(sriovclient, sriovDevice, testNetwork, sriovNamespaces.Test,
 			namespaces.SRIOVOperator, resourceName, ipam)
 		Expect(err).ToNot(HaveOccurred())
 
 		networkAttachDef := netattdefv1.NetworkAttachmentDefinition{}
 		waitForObject(
 			sriovclient,
-			runtimeclient.ObjectKey{Name: testNetwork, Namespace: namespaces.SRIOVOperator},
+			runtimeclient.ObjectKey{Name: testNetwork, Namespace: sriovNamespaces.Test},
 			&networkAttachDef)
 
 		nsX_podA, nsX_podB, nsX_podC = createPodsInNamespace(nsX)
@@ -192,21 +192,21 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 
 	podA := pods.DefinePod(namespace)
 	pods.RedefineWithLabel(podA, "app", "a")
-	pods.RedefinePodWithNetwork(podA, namespaces.SRIOVOperator+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podA, sriovNamespaces.Test+"/"+testNetwork)
 	redefineWithNetcatServer(podA)
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
 	podB := pods.DefinePod(namespace)
 	//pods.RedefineWithLabel(podB, "app", "b")
-	pods.RedefinePodWithNetwork(podB, namespaces.SRIOVOperator+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podB, sriovNamespaces.Test+"/"+testNetwork)
 	redefineWithNetcatServer(podB)
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
 	podC := pods.DefinePod(namespace)
 	//pods.RedefineWithLabel(podC, "app", "c")
-	pods.RedefinePodWithNetwork(podC, namespaces.SRIOVOperator+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podC, sriovNamespaces.Test+"/"+testNetwork)
 	redefineWithNetcatServer(podC)
 	podC.ObjectMeta.GenerateName = "testpod-c-"
 	//podC = createAndStartPod(podC)
@@ -324,12 +324,13 @@ func canSendTraffic(sourcePod, destinationPod *corev1.Pod) (bool, error) {
 		return false, fmt.Errorf("no ip address found for destination pod [%s] SR-IOV ip address: %w ", destinationPod.Name, err)
 	}
 
-	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 1 %s 5555", destinationIps[0])})
+	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s 5555", destinationIps[0])})
 	if err != nil {
 		if strings.Contains(output.String(), "Ncat: Connection timed out") {
 			// Return err == nil to allow assertion on connectivity absence
 			return false, nil
 		}
+		fmt.Println("errrrrrr: " + err.Error())
 		return false, fmt.Errorf("can't connect pods [%s] -> [%s]: %w ", sourcePod.Name, destinationPod.Name, err)
 	}
 
@@ -356,6 +357,10 @@ func printConnectivityMatrix(pods ...*corev1.Pod) {
 			go func() {
 				defer wg.Done()
 				connectivityStr := "-"
+				if s == nil || d == nil {
+					lines <- "---error---"
+					return
+				}
 				canReach, err := canSendTraffic(s, d)
 				if err != nil {
 					connectivityStr = err.Error()
