@@ -80,7 +80,7 @@ if [ "$TESTS_IN_CONTAINER" == "true" ]; then
   $TEST_EXECUTION_IMAGE /usr/bin/test-run.sh $FAIL_FAST $SKIP $FOCUS $GINKGO_PARAMS -junit /reports/ -report /reports/"
 else
   cnf-tests/hack/build-test-bin.sh
-  EXEC_TESTS="cnf-tests/entrypoint/test-run.sh $FAIL_FAST $SKIP $FOCUS $GINKGO_PARAMS -report $TESTS_REPORTS_PATH -junit $TESTS_REPORTS_PATH  -test.v"
+  EXEC_TESTS="cnf-tests/entrypoint/test-run.sh $FAIL_FAST $SKIP $FOCUS $GINKGO_PARAMS -report $TESTS_REPORTS_PATH -junit $TESTS_REPORTS_PATH  -test.v -v=9"
   # -test.cpuprofile $TESTS_REPORTS_PATH/cpu.prof -test.trace $TESTS_REPORTS_PATH/trace.out
 fi
 #-report $TESTS_REPORTS_PATH -vmodule=request=0
