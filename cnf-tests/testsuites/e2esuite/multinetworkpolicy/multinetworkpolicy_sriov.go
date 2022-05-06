@@ -36,8 +36,9 @@ import (
 )
 
 const (
-	resourceName = "sriovnicMultiNetworkpolicyResource"
-	testNetwork  = "test-multi-networkpolicy-sriov-network"
+	resourceName          = "sriovnicMultiNetworkpolicyResource"
+	testNetwork           = "test-multi-networkpolicy-sriov-network"
+	testsNetworkNamespace = "default"
 )
 
 // TODO - remove this: https://github.com/kubernetes/kubernetes/blob/master/test/e2e/network/netpol/network_policy.go
@@ -47,7 +48,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	sriovclient := sriovtestclient.New("")
 
 	// Common test model
-	const nsX string = sriovNamespaces.Test
+	const nsX string = sriovNamespaces.Test + "-x"
 	const nsY string = sriovNamespaces.Test + "-y"
 	const nsZ string = sriovNamespaces.Test + "-z"
 
@@ -95,14 +96,14 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		         		}]
 		       	}`
 
-		err = sriovNetwork.CreateSriovNetwork(sriovclient, sriovDevice, testNetwork, sriovNamespaces.Test,
+		err = sriovNetwork.CreateSriovNetwork(sriovclient, sriovDevice, testNetwork, testsNetworkNamespace,
 			namespaces.SRIOVOperator, resourceName, ipam)
 		Expect(err).ToNot(HaveOccurred())
 
 		networkAttachDef := netattdefv1.NetworkAttachmentDefinition{}
 		waitForObject(
 			sriovclient,
-			runtimeclient.ObjectKey{Name: testNetwork, Namespace: sriovNamespaces.Test},
+			runtimeclient.ObjectKey{Name: testNetwork, Namespace: testsNetworkNamespace},
 			&networkAttachDef)
 
 		nsX_podA, nsX_podB, nsX_podC = createPodsInNamespace(nsX)
@@ -132,7 +133,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	Context("", func() {
 		It("DENY all traffic to an application", func() {
 
-			multiNetPolicy := defineMultiNetworkPolicy(testNetwork)
+			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
 				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
 					multinetpolicyv1.PolicyTypeIngress,
@@ -192,21 +193,21 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 
 	podA := pods.DefinePod(namespace)
 	pods.RedefineWithLabel(podA, "app", "a")
-	pods.RedefinePodWithNetwork(podA, sriovNamespaces.Test+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podA, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podA)
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
 	podB := pods.DefinePod(namespace)
 	//pods.RedefineWithLabel(podB, "app", "b")
-	pods.RedefinePodWithNetwork(podB, sriovNamespaces.Test+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podB, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podB)
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
 	podC := pods.DefinePod(namespace)
 	//pods.RedefineWithLabel(podC, "app", "c")
-	pods.RedefinePodWithNetwork(podC, sriovNamespaces.Test+"/"+testNetwork)
+	pods.RedefinePodWithNetwork(podC, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podC)
 	podC.ObjectMeta.GenerateName = "testpod-c-"
 	//podC = createAndStartPod(podC)
