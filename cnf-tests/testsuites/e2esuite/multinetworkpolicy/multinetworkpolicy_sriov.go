@@ -46,8 +46,8 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	sriovclient := sriovtestclient.New("")
 
-	// Commond test model
-	const nsX string = sriovNamespaces.Test + "-x"
+	// Common test model
+	const nsX string = sriovNamespaces.Test
 	const nsY string = sriovNamespaces.Test + "-y"
 	const nsZ string = sriovNamespaces.Test + "-z"
 
@@ -106,10 +106,10 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			&networkAttachDef)
 
 		nsX_podA, nsX_podB, nsX_podC = createPodsInNamespace(nsX)
-		nsY_podA, nsY_podB, nsY_podC = createPodsInNamespace(nsY)
-		nsZ_podA, nsZ_podB, nsZ_podC = createPodsInNamespace(nsZ)
+		//nsY_podA, nsY_podB, nsY_podC = createPodsInNamespace(nsY)
+		//nsZ_podA, nsZ_podB, nsZ_podC = createPodsInNamespace(nsZ)
 
-		func(cc ...*corev1.Pod) {}(nsY_podA, nsY_podB, nsY_podC, nsZ_podA, nsZ_podB, nsZ_podC)
+		func(cc ...*corev1.Pod) {}(nsX_podC, nsY_podA, nsY_podB, nsY_podC, nsZ_podA, nsZ_podB, nsZ_podC)
 	})
 
 	BeforeEach(func() {
@@ -122,16 +122,17 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		// fmt.Println("Press the Enter Key to continue")
 		// fmt.Scanln()
 		printConnectivityMatrix(
-			nsX_podA, nsX_podB, nsX_podC,
-			nsY_podA, nsY_podB, nsY_podC,
-			nsZ_podA, nsZ_podB, nsZ_podC,
+			nsX_podA, nsX_podB,
+			// nsX_podC,
+			//nsY_podA, nsY_podB, nsY_podC,
+			//nsZ_podA, nsZ_podB, nsZ_podC,
 		)
 	})
 
 	Context("", func() {
 		It("DENY all traffic to an application", func() {
 
-			multiNetPolicy := defineMultiNetworkPolicy(sriovclient, testNetwork)
+			multiNetPolicy := defineMultiNetworkPolicy(testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
 				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
 					multinetpolicyv1.PolicyTypeIngress,
@@ -139,7 +140,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{},
 				PodSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"pod": "a",
+						"app": "a",
 					},
 				},
 			}
@@ -149,11 +150,11 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Pod B and C are not affected by the policy
-			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
+			//			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
 
 			// Pod A should not be reacheable by B and C
-			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			Eventually(nsX_podB, "60s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			//			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
 		})
 	})
 })
@@ -190,25 +191,25 @@ func createNamespaces(argNamespaces ...string) {
 func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.Pod) {
 
 	podA := pods.DefinePod(namespace)
-	pods.RedefineWithLabel(podA, "pod", "a")
+	pods.RedefineWithLabel(podA, "app", "a")
 	pods.RedefinePodWithNetwork(podA, namespaces.SRIOVOperator+"/"+testNetwork)
 	redefineWithNetcatServer(podA)
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
 	podB := pods.DefinePod(namespace)
-	pods.RedefineWithLabel(podB, "pod", "b")
+	//pods.RedefineWithLabel(podB, "app", "b")
 	pods.RedefinePodWithNetwork(podB, namespaces.SRIOVOperator+"/"+testNetwork)
 	redefineWithNetcatServer(podB)
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
 	podC := pods.DefinePod(namespace)
-	pods.RedefineWithLabel(podC, "pod", "c")
+	//pods.RedefineWithLabel(podC, "app", "c")
 	pods.RedefinePodWithNetwork(podC, namespaces.SRIOVOperator+"/"+testNetwork)
 	redefineWithNetcatServer(podC)
 	podC.ObjectMeta.GenerateName = "testpod-c-"
-	podC = createAndStartPod(podC)
+	//podC = createAndStartPod(podC)
 
 	return podA, podB, podC
 }
@@ -225,7 +226,7 @@ func waitForObject(clientSet *sriovtestclient.ClientSet, key runtimeclient.Objec
 		)
 }
 
-func defineMultiNetworkPolicy(clientSet *sriovtestclient.ClientSet, targetNetwork string) *multinetpolicyv1.MultiNetworkPolicy {
+func defineMultiNetworkPolicy(targetNetwork string) *multinetpolicyv1.MultiNetworkPolicy {
 	ret := multinetpolicyv1.MultiNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "test-multinetwork-policy-",
