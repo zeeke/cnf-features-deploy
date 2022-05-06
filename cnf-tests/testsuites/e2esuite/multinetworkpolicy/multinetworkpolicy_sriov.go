@@ -24,6 +24,7 @@ import (
 	client "github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/client"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/discovery"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/execute"
+	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/images"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/namespaces"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/nodes"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/pods"
@@ -107,8 +108,8 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			&networkAttachDef)
 
 		nsX_podA, nsX_podB, nsX_podC = createPodsInNamespace(nsX)
-		//nsY_podA, nsY_podB, nsY_podC = createPodsInNamespace(nsY)
-		//nsZ_podA, nsZ_podB, nsZ_podC = createPodsInNamespace(nsZ)
+		nsY_podA, nsY_podB, nsY_podC = createPodsInNamespace(nsY)
+		nsZ_podA, nsZ_podB, nsZ_podC = createPodsInNamespace(nsZ)
 
 		func(cc ...*corev1.Pod) {}(nsX_podC, nsY_podA, nsY_podB, nsY_podC, nsZ_podA, nsZ_podB, nsZ_podC)
 	})
@@ -120,14 +121,14 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	AfterEach(func() {
 		// TODO clean up
 
-		// fmt.Println("Press the Enter Key to continue")
-		// fmt.Scanln()
-		printConnectivityMatrix(
-			nsX_podA, nsX_podB,
-			// nsX_podC,
-			//nsY_podA, nsY_podB, nsY_podC,
-			//nsZ_podA, nsZ_podB, nsZ_podC,
-		)
+		if CurrentGinkgoTestDescription().Failed {
+			printConnectivityMatrix(
+				nsX_podA, nsX_podB, nsX_podC,
+				nsY_podA, nsY_podB, nsY_podC,
+				nsZ_podA, nsZ_podB, nsZ_podC,
+			)
+		}
+
 	})
 
 	Context("", func() {
@@ -141,7 +142,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{},
 				PodSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"app": "a",
+						"pod": "a",
 					},
 				},
 			}
@@ -151,11 +152,11 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Pod B and C are not affected by the policy
-			//			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
+			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
 
 			// Pod A should not be reacheable by B and C
-			Eventually(nsX_podB, "60s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			//			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
 		})
 	})
 })
@@ -192,25 +193,25 @@ func createNamespaces(argNamespaces ...string) {
 func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.Pod) {
 
 	podA := pods.DefinePod(namespace)
-	pods.RedefineWithLabel(podA, "app", "a")
+	pods.RedefineWithLabel(podA, "pod", "a")
 	pods.RedefinePodWithNetwork(podA, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podA)
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
 	podB := pods.DefinePod(namespace)
-	//pods.RedefineWithLabel(podB, "app", "b")
+	pods.RedefineWithLabel(podB, "pod", "b")
 	pods.RedefinePodWithNetwork(podB, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podB)
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
 	podC := pods.DefinePod(namespace)
-	//pods.RedefineWithLabel(podC, "app", "c")
+	pods.RedefineWithLabel(podC, "pod", "c")
 	pods.RedefinePodWithNetwork(podC, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServer(podC)
 	podC.ObjectMeta.GenerateName = "testpod-c-"
-	//podC = createAndStartPod(podC)
+	podC = createAndStartPod(podC)
 
 	return podA, podB, podC
 }
@@ -241,7 +242,10 @@ func defineMultiNetworkPolicy(targetNetwork string) *multinetpolicyv1.MultiNetwo
 }
 
 func redefineWithNetcatServer(pod *corev1.Pod) *corev1.Pod {
-	pod.Spec.Containers[0].Command = []string{"bash", "-c", "nc -k -l 0.0.0.0 5555"}
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
+		Name:    "netcat-server",
+		Image:   images.For(images.TestUtils),
+		Command: []string{"nc", "-k", "-l", "0.0.0.0", "5555"}})
 	return pod
 }
 
@@ -328,10 +332,9 @@ func canSendTraffic(sourcePod, destinationPod *corev1.Pod) (bool, error) {
 	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s 5555", destinationIps[0])})
 	if err != nil {
 		if strings.Contains(output.String(), "Ncat: Connection timed out") {
-			// Return err == nil to allow assertion on connectivity absence
+			// Timeout error is symptom of no
 			return false, nil
 		}
-		fmt.Println("errrrrrr: " + err.Error())
 		return false, fmt.Errorf("can't connect pods [%s] -> [%s]: %w ", sourcePod.Name, destinationPod.Name, err)
 	}
 
@@ -381,18 +384,4 @@ func printConnectivityMatrix(pods ...*corev1.Pod) {
 
 	wg.Wait()
 	close(lines)
-
-	/*
-		for _, source := range pods {
-			for _, destination := range pods {
-
-				fmt.Printf("%s/%s -> %s/%s : %s\n",
-					source.Namespace, source.Name,
-					destination.Namespace, destination.Name,
-					connectivityStr,
-				)
-			}
-		}
-
-	*/
 }
