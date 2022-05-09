@@ -237,7 +237,7 @@ func ExecCommand(cs *testclient.ClientSet, pod corev1.Pod, command []string) (by
 			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
-			TTY:       false,
+			TTY:       true,
 		}, scheme.ParameterCodec)
 
 	exec, err := remotecommand.NewSPDYExecutor(cs.Config, "POST", req.URL())
@@ -249,7 +249,7 @@ func ExecCommand(cs *testclient.ClientSet, pod corev1.Pod, command []string) (by
 		Stdin:  nil,
 		Stdout: &buf,
 		Stderr: os.Stderr,
-		Tty:    false,
+		Tty:    true,
 	})
 	if err != nil {
 		return buf, fmt.Errorf("remote command %v error [%w]. output [%s]", command, err, buf.String())
