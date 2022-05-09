@@ -238,7 +238,56 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
 		})
 
+		It("ALLOW traffic to nsX_podA only from (namespace == nsY)", func() {
+
+			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+
+			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+					multinetpolicyv1.PolicyTypeIngress,
+				},
+				Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					{
+						From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": nsY,
+								},
+							},
+						}},
+					},
+				},
+				Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				},
+			}
+
+			_, err := client.Client.MultiNetworkPolicies(nsX).
+				Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Allowed
+			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podA))
+			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
+			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+
+			// Not allowed
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podB))
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
+
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
+			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+		})
+
 		It("ALLOW traffic to nsX_podA only from (nsY/* OR nsZ/podB)", func() {
+
+			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
 				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
@@ -292,7 +341,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
 		})
 
-		It("ALLOW traffic to nsX_podA only from (ns IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
+		It("ALLOW traffic to nsX_podA only from (namespace IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
+
+			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
 
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -315,8 +366,8 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{"b", "c"},
 								}},
-							}},
-						},
+							},
+						}},
 					},
 				},
 				Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
@@ -344,6 +395,84 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
 		})
+	})
+
+	It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (namespace IN {nsY, nsZ} AND pod IN {podB, podC})]", func() {
+
+		Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+
+		pol1 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+		pol1.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+			PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+				multinetpolicyv1.PolicyTypeIngress,
+			},
+			Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+				{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "pod",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"b", "c"},
+							}},
+						},
+					}},
+				},
+			},
+			Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"pod": "a",
+				},
+			},
+		}
+
+		_, err := client.Client.MultiNetworkPolicies(nsX).
+			Create(context.Background(), pol1, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		pol2 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+		pol2.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+			PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+				multinetpolicyv1.PolicyTypeIngress,
+			},
+			Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+				{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "kubernetes.io/metadata.name",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{nsY, nsZ},
+							}},
+						},
+					}},
+				},
+			},
+			Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"pod": "a",
+				},
+			},
+		}
+
+		_, err = client.Client.MultiNetworkPolicies(nsX).
+			Create(context.Background(), pol2, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		// Allowed
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podC))
+
+		// Not allowed
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
 	})
 })
 
