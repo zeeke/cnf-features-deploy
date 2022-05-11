@@ -32,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -46,6 +47,13 @@ const (
 const nsX string = sriovNamespaces.Test + "-x"
 const nsY string = sriovNamespaces.Test + "-y"
 const nsZ string = sriovNamespaces.Test + "-z"
+
+var port5555 intstr.IntOrString = intstr.FromInt(5555)
+var port6666 intstr.IntOrString = intstr.FromInt(6666)
+var protoTCP corev1.Protocol = corev1.ProtocolTCP
+var protoUDP corev1.Protocol = corev1.ProtocolUDP
+
+//protoTCP := v1.ProtocolTCP
 
 // TODO - remove this: https://github.com/kubernetes/kubernetes/blob/master/test/e2e/network/netpol/network_policy.go
 
@@ -111,6 +119,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		nsY_podA, nsY_podB, nsY_podC = createPodsInNamespace(nsY)
 		nsZ_podA, nsZ_podB, nsZ_podC = createPodsInNamespace(nsZ)
 
+		// TODO remove
 		func(cc ...*corev1.Pod) {}(nsX_podC, nsY_podA, nsY_podB, nsY_podC, nsZ_podA, nsZ_podB, nsZ_podC)
 	})
 
@@ -129,6 +138,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				nsY_podA, nsY_podB, nsY_podC,
 				nsZ_podA, nsZ_podB, nsZ_podC,
 			)
+
+			// fmt.Println("Debug time: 1 hour ...")
+			// time.Sleep(1 * time.Hour)
 		}
 
 	})
@@ -240,8 +252,6 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 		It("ALLOW traffic to nsX_podA only from (namespace == nsY)", func() {
 
-			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
-
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
 				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
@@ -284,9 +294,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
 		})
 
-		It("ALLOW traffic to nsX_podA only from (nsY/* OR nsZ/podB)", func() {
-
-			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+		It("ALLOW traffic to nsX_podA only from (nsY/* OR */podB)", func() {
 
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -331,19 +339,20 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
 
 			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
+			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podB))
 
 			// Not allowed
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
 
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
 		})
 
 		It("ALLOW traffic to nsX_podA only from (namespace IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
 
-			Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+			Skip("LabelSelectorwith multiple In values is not yet supported by multi-networkpolicy-iptables")
+			//			E0511 14:37:07.698115       1 policyrules.go:238] pod selector: operator "In" without a single value cannot be converted into the old label selector format
 
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -392,14 +401,15 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
 			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
 		})
 	})
 
-	It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (namespace IN {nsY, nsZ} AND pod IN {podB, podC})]", func() {
+	It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (nsY/* OR */podB)]", func() {
 
-		Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+		//Skip("NamespaceSelector not supported by Multus Network Policy iptables")
 
 		pol1 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 		pol1.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -413,7 +423,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 							MatchExpressions: []metav1.LabelSelectorRequirement{{
 								Key:      "pod",
 								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{"b", "c"},
+								Values:   []string{"b"},
 							}},
 						},
 					}},
@@ -443,7 +453,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 							MatchExpressions: []metav1.LabelSelectorRequirement{{
 								Key:      "kubernetes.io/metadata.name",
 								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{nsY, nsZ},
+								Values:   []string{nsY},
 							}},
 						},
 					}},
@@ -462,18 +472,68 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Allowed
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podA))
 		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
 		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+
 		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podC))
+		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podB))
 
 		// Not allowed
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
 		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
+
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
 	})
+
+	It("Allow access only to a specific port/protocol", func() {
+
+		//Skip("WIP")
+
+		multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+		multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+			PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+				multinetpolicyv1.PolicyTypeIngress,
+			},
+			Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+				{
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port5555, // Default protocol: TCP
+						Protocol: &protoTCP,
+						// }, {
+						// 	Port:     &port6666,
+						// 	Protocol: &protoUDP,
+						// },
+					}},
+				}, {
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port6666,
+						Protocol: &protoUDP,
+					}},
+				},
+			},
+			Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"pod": "a",
+				},
+			},
+		}
+
+		_, err := client.Client.MultiNetworkPolicies(nsX).
+			Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		// Allowed
+		Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podA, OnPort(port5555), ViaTCP))
+		Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podA, OnPort(port6666), ViaUDP))
+
+		// Not allowed
+		Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA, OnPort(port5555), ViaUDP))
+		Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA, OnPort(port6666), ViaTCP))
+	})
+
 })
 
 func cleanPodsInNamespaces(argNamespaces ...string) {
@@ -510,21 +570,21 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 	podA := pods.DefinePod(namespace)
 	pods.RedefineWithLabel(podA, "pod", "a")
 	pods.RedefinePodWithNetwork(podA, testsNetworkNamespace+"/"+testNetwork)
-	redefineWithNetcatServer(podA)
+	redefineWithNetcatServers(podA)
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
 	podB := pods.DefinePod(namespace)
 	pods.RedefineWithLabel(podB, "pod", "b")
 	pods.RedefinePodWithNetwork(podB, testsNetworkNamespace+"/"+testNetwork)
-	redefineWithNetcatServer(podB)
+	redefineWithNetcatServers(podB)
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
 	podC := pods.DefinePod(namespace)
 	pods.RedefineWithLabel(podC, "pod", "c")
 	pods.RedefinePodWithNetwork(podC, testsNetworkNamespace+"/"+testNetwork)
-	redefineWithNetcatServer(podC)
+	redefineWithNetcatServers(podC)
 	podC.ObjectMeta.GenerateName = "testpod-c-"
 	podC = createAndStartPod(podC)
 
@@ -556,11 +616,23 @@ func defineMultiNetworkPolicy(targetNetwork string) *multinetpolicyv1.MultiNetwo
 	return &ret
 }
 
-func redefineWithNetcatServer(pod *corev1.Pod) *corev1.Pod {
+func redefineWithNetcatServers(pod *corev1.Pod) *corev1.Pod {
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-		Name:    "netcat-server",
+		Name:    "netcat-tcp-server-5555",
 		Image:   images.For(images.TestUtils),
-		Command: []string{"nc", "-k", "-l", "0.0.0.0", "5555"}})
+		Command: []string{"nc", "--keep-open", "--listen", "0.0.0.0", "5555"}})
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
+		Name:    "netcat-udp-server-5555",
+		Image:   images.For(images.TestUtils),
+		Command: []string{"nc", "--keep-open", "--udp", "--exec", "/bin/cat", "--listen", "0.0.0.0", "5555"}})
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
+		Name:    "netcat-tcp-server-6666",
+		Image:   images.For(images.TestUtils),
+		Command: []string{"nc", "--keep-open", "--listen", "0.0.0.0", "6666"}})
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
+		Name:    "netcat-udp-server-6666",
+		Image:   images.For(images.TestUtils),
+		Command: []string{"nc", "--keep-open", "--udp", "--exec", "/bin/cat", "--listen", "0.0.0.0", "6666"}})
 	return pod
 }
 
@@ -582,27 +654,55 @@ func createAndStartPod(pod *corev1.Pod) *corev1.Pod {
 	return res
 }
 
-type TrafficMatcherFactory struct {
-	sriovclient *sriovtestclient.ClientSet
+type SendTrafficToMatcherOpt func(*SendTrafficToMatcher)
+
+func BeAbleToSendTrafficTo(destinationPod *corev1.Pod, opts ...SendTrafficToMatcherOpt) types.GomegaMatcher {
+	ret := &SendTrafficToMatcher{
+		destinationPod:  destinationPod,
+		destinationPort: port5555.String(),
+		protocol:        protoTCP,
+	}
+
+	for _, opt := range opts {
+		opt(ret)
+	}
+
+	return ret
 }
 
-func (t *TrafficMatcherFactory) SendTrafficTo(destinationPod *corev1.Pod) types.GomegaMatcher {
-	return &SendTrafficToMatcher{
-		destinationPod: destinationPod,
-		sriovclient:    t.sriovclient,
+func OnPort(port intstr.IntOrString) SendTrafficToMatcherOpt {
+	return func(s *SendTrafficToMatcher) {
+		s.destinationPort = port.String()
 	}
 }
 
-func BeAbleToSendTrafficTo(destinationPod *corev1.Pod) types.GomegaMatcher {
-	return &SendTrafficToMatcher{
-		destinationPod: destinationPod,
-		sriovclient:    nil,
+/*
+
+func UDP() SendTrafficToMatcherOpt {
+	return func(s *SendTrafficToMatcher) {
+		s.protocol = corev1.ProtocolUDP
 	}
+}
+
+func TCP() SendTrafficToMatcherOpt {
+	return func(s *SendTrafficToMatcher) {
+		s.protocol = corev1.ProtocolTCP
+	}
+}
+
+*/
+var ViaTCP SendTrafficToMatcherOpt = func(s *SendTrafficToMatcher) {
+	s.protocol = corev1.ProtocolTCP
+}
+
+var ViaUDP SendTrafficToMatcherOpt = func(s *SendTrafficToMatcher) {
+	s.protocol = corev1.ProtocolUDP
 }
 
 type SendTrafficToMatcher struct {
-	destinationPod *corev1.Pod
-	sriovclient    *sriovtestclient.ClientSet
+	destinationPod  *corev1.Pod
+	destinationPort string
+	protocol        corev1.Protocol
 }
 
 func (m *SendTrafficToMatcher) Match(actual interface{}) (bool, error) {
@@ -611,7 +711,7 @@ func (m *SendTrafficToMatcher) Match(actual interface{}) (bool, error) {
 		return false, fmt.Errorf("SendTrafficToMatcher must be passed an *Pod. Got\n%s", format.Object(actual, 1))
 	}
 
-	return canSendTraffic(sourcePod, m.destinationPod)
+	return canSendTraffic(sourcePod, m.destinationPod, m.destinationPort, m.protocol)
 }
 
 func (matcher *SendTrafficToMatcher) FailureMessage(actual interface{}) string {
@@ -620,8 +720,11 @@ func (matcher *SendTrafficToMatcher) FailureMessage(actual interface{}) string {
 		return "SendTrafficToMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is not reachable by pod [%s/%s], but it should be",
-		matcher.destinationPod.Namespace, matcher.destinationPod.Name, sourcePod.Namespace, sourcePod.Name)
+	return fmt.Sprintf("pod [%s/%s] is not reachable by pod [%s/%s] on port[%s:%s], but it should be",
+		matcher.destinationPod.Namespace, matcher.destinationPod.Name,
+		sourcePod.Namespace, sourcePod.Name,
+		matcher.protocol, matcher.destinationPort,
+	)
 }
 
 func (matcher *SendTrafficToMatcher) NegatedFailureMessage(actual interface{}) string {
@@ -630,11 +733,14 @@ func (matcher *SendTrafficToMatcher) NegatedFailureMessage(actual interface{}) s
 		return "SendTrafficToMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is reachable by pod [%s/%s], but it shouldn't be",
-		matcher.destinationPod.Namespace, matcher.destinationPod.Name, sourcePod.Namespace, sourcePod.Name)
+	return fmt.Sprintf("pod [%s/%s] is reachable by pod [%s/%s] on port[%s:%s], but it shouldn't be",
+		matcher.destinationPod.Namespace, matcher.destinationPod.Name,
+		sourcePod.Namespace, sourcePod.Name,
+		matcher.protocol, matcher.destinationPort,
+	)
 }
 
-func canSendTraffic(sourcePod, destinationPod *corev1.Pod) (bool, error) {
+func canSendTraffic(sourcePod, destinationPod *corev1.Pod, destinationPort string, protocol corev1.Protocol) (bool, error) {
 	destinationIps, err := network.GetSriovNicIPs(destinationPod, "net1")
 	if err != nil {
 		return false, fmt.Errorf("can't determine destination pod [%s] SR-IOV ip address: %w ", destinationPod.Name, err)
@@ -644,7 +750,12 @@ func canSendTraffic(sourcePod, destinationPod *corev1.Pod) (bool, error) {
 		return false, fmt.Errorf("no ip address found for destination pod [%s] SR-IOV ip address: %w ", destinationPod.Name, err)
 	}
 
-	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s 5555", destinationIps[0])})
+	protocolArg := ""
+	if protocol == corev1.ProtocolUDP {
+		protocolArg = "--udp"
+	}
+
+	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s %s %s", protocolArg, destinationIps[0], destinationPort)})
 	if err != nil {
 		if strings.Contains(output.String(), "Ncat: Connection timed out") {
 			// Timeout error is symptom of no
@@ -692,7 +803,7 @@ func printConnectivityMatrix(pods ...*corev1.Pod) {
 				if s == nil || d == nil {
 					return
 				}
-				canReach, err := canSendTraffic(s, d)
+				canReach, err := canSendTraffic(s, d, port5555.String(), protoTCP) // TODO
 				if err != nil {
 					fmt.Println(err.Error())
 				}

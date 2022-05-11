@@ -19,6 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	multinetpolicyv1 "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	netattdefv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	n3000v1 "github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/apis/N3000/api/v1"
 	sriovfecv2 "github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/apis/sriov-fec/api/v2"
 	"github.com/openshift-kni/cnf-features-deploy/cnf-tests/testsuites/pkg/k8sreporter"
@@ -39,6 +41,7 @@ func NewReporter(reportPath string) (*k8sreporter.KubernetesReporter, error) {
 		ocpv1.Install(s)
 		ocpbuildv1.Install(s)
 		multinetpolicyv1.AddToScheme(s)
+		netattdefv1.AddToScheme(s)
 	}
 
 	namespacesToDump := map[string]string{
@@ -51,6 +54,7 @@ func NewReporter(reportPath string) (*k8sreporter.KubernetesReporter, error) {
 		sriovNamespaces.Test + "-x":             "sriov",
 		sriovNamespaces.Test + "-y":             "sriov",
 		sriovNamespaces.Test + "-z":             "sriov",
+		"kube-system":                           "sriov", // TODO remove me
 		ptpUtils.NamespaceTesting:               "ptp",
 		namespaces.SCTPTest:                     "sctp",
 		namespaces.Default:                      "sctp",
@@ -94,6 +98,7 @@ func NewReporter(reportPath string) (*k8sreporter.KubernetesReporter, error) {
 		{Cr: &ocpbuildv1.BuildConfigList{}, Namespace: &namespaces.SroTestNamespace},
 		{Cr: &ocpbuildv1.BuildList{}, Namespace: &namespaces.SroTestNamespace},
 		{Cr: &multinetpolicyv1.MultiNetworkPolicyList{}},
+		{Cr: &netattdefv1.NetworkAttachmentDefinitionList{}},
 	}
 
 	skipByNamespace := func(ns string) bool {
