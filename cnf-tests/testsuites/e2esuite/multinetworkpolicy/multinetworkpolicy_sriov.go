@@ -57,13 +57,13 @@ var protoUDP corev1.Protocol = corev1.ProtocolUDP
 
 // TODO - remove this: https://github.com/kubernetes/kubernetes/blob/master/test/e2e/network/netpol/network_policy.go
 
+var nsX_podA, nsX_podB, nsX_podC *corev1.Pod
+var nsY_podA, nsY_podB, nsY_podC *corev1.Pod
+var nsZ_podA, nsZ_podB, nsZ_podC *corev1.Pod
+
 var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	sriovclient := sriovtestclient.New("")
-
-	var nsX_podA, nsX_podB, nsX_podC *corev1.Pod
-	var nsY_podA, nsY_podB, nsY_podC *corev1.Pod
-	var nsZ_podA, nsZ_podB, nsZ_podC *corev1.Pod
 
 	execute.BeforeAll(func() {
 
@@ -132,7 +132,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 	AfterEach(func() {
 		// TODO clean up
 
-		if CurrentGinkgoTestDescription().Failed {
+		/*if CurrentGinkgoTestDescription().Failed {
 			printConnectivityMatrix(
 				nsX_podA, nsX_podB, nsX_podC,
 				nsY_podA, nsY_podB, nsY_podC,
@@ -142,42 +142,38 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			// fmt.Println("Debug time: 1 hour ...")
 			// time.Sleep(1 * time.Hour)
 		}
-
+		*/
 	})
 
 	Context("", func() {
 		It("DENY all traffic to a pod", func() {
 
-			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
-			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
-				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
-					multinetpolicyv1.PolicyTypeIngress,
-				},
-				Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{},
-				PodSelector: metav1.LabelSelector{
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"pod": "a",
 					},
-				},
-			}
-
-			_, err := client.Client.MultiNetworkPolicies(nsX).
-				Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred())
+				}),
+				WithEmptyIngressRules(),
+				CreateInNamespace(nsX),
+			)
 
 			// Pod B and C are not affected by the policy
-			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
+			eventually30s(nsX_podB).Should(Reach(nsX_podC))
 
 			// Pod A should not be reacheable by B and C
-			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA))
+			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
 
 			// nsX_podA should be able to send traffic to
-			// Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+			// eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
 		})
 
 		It("DENY all traffic to/from/in a namespace", func() {
 
+			// makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+			// 	WithEmptyIngressRules(),
+			// )
 			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
 				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
@@ -193,21 +189,21 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Traffic within nsX is not allowed
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
-			Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
-			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podB))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podC))
+			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
 
 			// Traffic to/from nsX is not allowed
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsY_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
 
 			// Traffic within other namespaces is allowed
-			Eventually(nsY_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
-			Eventually(nsZ_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
+			eventually30s(nsY_podA).Should(Reach(nsY_podB))
+			eventually30s(nsZ_podA).Should(Reach(nsZ_podB))
 
 			// Traffic between other namespaces is allowed
-			Eventually(nsY_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podA))
-			Eventually(nsZ_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+			eventually30s(nsY_podA).Should(Reach(nsZ_podA))
+			eventually30s(nsZ_podB).Should(Reach(nsY_podC))
 		})
 
 		It("ALLOW traffic to nsX_podA only from nsX_podB", func() {
@@ -243,11 +239,11 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// The subject of test case
-			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podC, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
+			eventually30s(nsX_podB).Should(Reach(nsX_podA))
+			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
 
 			// Traffic that should not be affected
-			Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podC))
+			eventually30s(nsX_podB).Should(Reach(nsX_podC))
 		})
 
 		It("ALLOW traffic to nsX_podA only from (namespace == nsY)", func() {
@@ -281,72 +277,61 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Allowed
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podA))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+			eventually30s(nsX_podA).Should(Reach(nsY_podA))
+			eventually30s(nsX_podA).Should(Reach(nsY_podB))
+			eventually30s(nsX_podA).Should(Reach(nsY_podC))
 
 			// Not allowed
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podB))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podB))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
 
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podB))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
 		})
 
 		It("ALLOW traffic to nsX_podA only from (nsY/* OR */podB)", func() {
 
-			multiNetPolicy := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
-			multiNetPolicy.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
-				PolicyTypes: []multinetpolicyv1.MultiPolicyType{
-					multinetpolicyv1.PolicyTypeIngress,
-				},
-				Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
-					{
-						From: []multinetpolicyv1.MultiNetworkPolicyPeer{
-							{
-								NamespaceSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"kubernetes.io/metadata.name": nsY,
-									},
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": nsY,
 								},
 							},
-							{
-								PodSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"pod": "b",
-									},
+						},
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"pod": "b",
 								},
 							},
 						},
 					},
-				},
-				Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"pod": "a",
-					},
-				},
-			}
-
-			_, err := client.Client.MultiNetworkPolicies(nsX).
-				Create(context.Background(), multiNetPolicy, metav1.CreateOptions{})
-			Expect(err).ToNot(HaveOccurred())
+				}),
+				CreateInNamespace(nsX),
+			)
 
 			// Allowed
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podA))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+			eventually30s(nsX_podA).Should(Reach(nsY_podA))
+			eventually30s(nsX_podA).Should(Reach(nsY_podB))
+			eventually30s(nsX_podA).Should(Reach(nsY_podC))
 
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podB))
+			eventually30s(nsX_podA).Should(Reach(nsZ_podB))
+			eventually30s(nsX_podA).Should(Reach(nsX_podB))
 
 			// Not allowed
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
 
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
 		})
 
 		It("ALLOW traffic to nsX_podA only from (namespace IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
@@ -392,24 +377,24 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Allowed
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
-			Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podC))
+			eventually30s(nsX_podA).Should(Reach(nsY_podB))
+			eventually30s(nsX_podA).Should(Reach(nsY_podC))
+			eventually30s(nsX_podA).Should(Reach(nsZ_podB))
+			eventually30s(nsX_podA).Should(Reach(nsZ_podC))
 
 			// Not allowed
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podB))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podB))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
 
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsY_podA))
-			Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsY_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
 		})
 	})
 
 	It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (nsY/* OR */podB)]", func() {
 
-		//Skip("NamespaceSelector not supported by Multus Network Policy iptables")
+		Skip("Stacked policies are not yet supported")
 
 		pol1 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
 		pol1.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
@@ -472,19 +457,103 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Allowed
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podA))
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podB))
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsY_podC))
+		eventually30s(nsX_podA).Should(Reach(nsY_podA))
+		eventually30s(nsX_podA).Should(Reach(nsY_podB))
+		eventually30s(nsX_podA).Should(Reach(nsY_podC))
 
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsZ_podB))
-		Eventually(nsX_podA, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podB))
+		eventually30s(nsX_podA).Should(Reach(nsZ_podB))
+		eventually30s(nsX_podA).Should(Reach(nsX_podB))
 
 		// Not allowed
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podA))
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsZ_podC))
+		eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
+		eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
 
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA))
-		Eventually(nsX_podA, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podC))
+		eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
+	})
+
+	It("enforce multiple stacked policies with overlapping selector and different ports (*/podB ==> nsX/podA:5555 , */podC ==> nsX/podA:6666)", func() {
+
+		Skip("Stacked policies are not yet supported")
+
+		pol1 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+		pol1.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+			PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+				multinetpolicyv1.PolicyTypeIngress,
+			},
+			Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+				{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
+						},
+					}},
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port5555,
+						Protocol: &protoTCP,
+					}},
+				},
+			},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"pod": "a",
+				},
+			},
+		}
+
+		_, err := client.Client.MultiNetworkPolicies(nsX).
+			Create(context.Background(), pol1, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		pol2 := defineMultiNetworkPolicy(testsNetworkNamespace + "/" + testNetwork)
+		pol2.Spec = multinetpolicyv1.MultiNetworkPolicySpec{
+			PolicyTypes: []multinetpolicyv1.MultiPolicyType{
+				multinetpolicyv1.PolicyTypeIngress,
+			},
+			Ingress: []multinetpolicyv1.MultiNetworkPolicyIngressRule{
+				{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "c",
+							},
+						},
+					}},
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port6666,
+						Protocol: &protoTCP,
+					}},
+				},
+			},
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"pod": "a",
+				},
+			},
+		}
+
+		_, err = client.Client.MultiNetworkPolicies(nsX).
+			Create(context.Background(), pol2, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+
+		// Allowed
+		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+		eventually30s(nsY_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+		eventually30s(nsZ_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+
+		eventually30s(nsX_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+		eventually30s(nsY_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+		eventually30s(nsZ_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+
+		// Not allowed
+		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+		eventually30s(nsY_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+		eventually30s(nsZ_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+
+		eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
+		eventually30s(nsY_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
+		eventually30s(nsZ_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
 	})
 
 	It("Allow access only to a specific port/protocol", func() {
@@ -501,19 +570,17 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
 						Port:     &port5555, // Default protocol: TCP
 						Protocol: &protoTCP,
-						// }, {
-						// 	Port:     &port6666,
-						// 	Protocol: &protoUDP,
-						// },
-					}},
-				}, {
-					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+					}, {
 						Port:     &port6666,
 						Protocol: &protoUDP,
 					}},
+					//}, {
+					//	Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+					//		Port:     &port6666,
+					//		Protocol: &protoUDP,
+					//	}},
 				},
 			},
-			Egress: []multinetpolicyv1.MultiNetworkPolicyEgressRule{},
 			PodSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"pod": "a",
@@ -526,12 +593,12 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Allowed
-		Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podA, OnPort(port5555), ViaTCP))
-		Eventually(nsX_podB, "30s", "1s").Should(BeAbleToSendTrafficTo(nsX_podA, OnPort(port6666), ViaUDP))
+		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555), ViaTCP))
+		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
 
 		// Not allowed
-		Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA, OnPort(port5555), ViaUDP))
-		Eventually(nsX_podB, "30s", "1s").ShouldNot(BeAbleToSendTrafficTo(nsX_podA, OnPort(port6666), ViaTCP))
+		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
+		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
 	})
 
 })
@@ -616,6 +683,56 @@ func defineMultiNetworkPolicy(targetNetwork string) *multinetpolicyv1.MultiNetwo
 	return &ret
 }
 
+type MultiNetworkPolicyOpt func(*multinetpolicyv1.MultiNetworkPolicy)
+
+func WithPodSelector(podSelector metav1.LabelSelector) MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		pol.Spec.PodSelector = podSelector
+	}
+}
+
+func WithEmptyIngressRules() MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		pol.Spec.PolicyTypes = appendIfNotPresent(pol.Spec.PolicyTypes, multinetpolicyv1.PolicyTypeIngress)
+		pol.Spec.Ingress = []multinetpolicyv1.MultiNetworkPolicyIngressRule{}
+	}
+}
+
+func WithIngressRule(rule multinetpolicyv1.MultiNetworkPolicyIngressRule) MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		pol.Spec.PolicyTypes = appendIfNotPresent(pol.Spec.PolicyTypes, multinetpolicyv1.PolicyTypeIngress)
+		pol.Spec.Ingress = append(pol.Spec.Ingress, rule)
+	}
+}
+
+func CreateInNamespace(ns string) MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		ret, err := client.Client.MultiNetworkPolicies(ns).
+			Create(context.Background(), pol, metav1.CreateOptions{})
+
+		Expect(err).ToNot(HaveOccurred())
+
+		ret.DeepCopyInto(pol)
+	}
+}
+
+func makeMultiNetworkPolicy(targetNetwork string, opts ...MultiNetworkPolicyOpt) *multinetpolicyv1.MultiNetworkPolicy {
+	ret := multinetpolicyv1.MultiNetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "test-multinetwork-policy-",
+			Annotations: map[string]string{
+				"k8s.v1.cni.cncf.io/policy-for": targetNetwork,
+			},
+		},
+	}
+
+	for _, opt := range opts {
+		opt(&ret)
+	}
+
+	return &ret
+}
+
 func redefineWithNetcatServers(pod *corev1.Pod) *corev1.Pod {
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 		Name:    "netcat-tcp-server-5555",
@@ -654,9 +771,9 @@ func createAndStartPod(pod *corev1.Pod) *corev1.Pod {
 	return res
 }
 
-type SendTrafficToMatcherOpt func(*SendTrafficToMatcher)
+type ReachOpt func(*SendTrafficToMatcher)
 
-func BeAbleToSendTrafficTo(destinationPod *corev1.Pod, opts ...SendTrafficToMatcherOpt) types.GomegaMatcher {
+func Reach(destinationPod *corev1.Pod, opts ...ReachOpt) types.GomegaMatcher {
 	ret := &SendTrafficToMatcher{
 		destinationPod:  destinationPod,
 		destinationPort: port5555.String(),
@@ -670,7 +787,7 @@ func BeAbleToSendTrafficTo(destinationPod *corev1.Pod, opts ...SendTrafficToMatc
 	return ret
 }
 
-func OnPort(port intstr.IntOrString) SendTrafficToMatcherOpt {
+func OnPort(port intstr.IntOrString) ReachOpt {
 	return func(s *SendTrafficToMatcher) {
 		s.destinationPort = port.String()
 	}
@@ -678,24 +795,24 @@ func OnPort(port intstr.IntOrString) SendTrafficToMatcherOpt {
 
 /*
 
-func UDP() SendTrafficToMatcherOpt {
+func UDP() ReachOpt {
 	return func(s *SendTrafficToMatcher) {
 		s.protocol = corev1.ProtocolUDP
 	}
 }
 
-func TCP() SendTrafficToMatcherOpt {
+func TCP() ReachOpt {
 	return func(s *SendTrafficToMatcher) {
 		s.protocol = corev1.ProtocolTCP
 	}
 }
 
 */
-var ViaTCP SendTrafficToMatcherOpt = func(s *SendTrafficToMatcher) {
+var ViaTCP ReachOpt = func(s *SendTrafficToMatcher) {
 	s.protocol = corev1.ProtocolTCP
 }
 
-var ViaUDP SendTrafficToMatcherOpt = func(s *SendTrafficToMatcher) {
+var ViaUDP ReachOpt = func(s *SendTrafficToMatcher) {
 	s.protocol = corev1.ProtocolUDP
 }
 
@@ -714,29 +831,39 @@ func (m *SendTrafficToMatcher) Match(actual interface{}) (bool, error) {
 	return canSendTraffic(sourcePod, m.destinationPod, m.destinationPort, m.protocol)
 }
 
-func (matcher *SendTrafficToMatcher) FailureMessage(actual interface{}) string {
+func (m *SendTrafficToMatcher) FailureMessage(actual interface{}) string {
 	sourcePod, ok := actual.(*corev1.Pod)
 	if !ok {
 		return "SendTrafficToMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is not reachable by pod [%s/%s] on port[%s:%s], but it should be",
-		matcher.destinationPod.Namespace, matcher.destinationPod.Name,
+	return fmt.Sprintf("pod [%s/%s] is not reachable by pod [%s/%s] on port[%s:%s], but it should be. \n%s",
+		m.destinationPod.Namespace, m.destinationPod.Name,
 		sourcePod.Namespace, sourcePod.Name,
-		matcher.protocol, matcher.destinationPort,
+		m.protocol, m.destinationPort,
+		printConnectivityMatrix(m.destinationPort, m.protocol,
+			nsX_podA, nsX_podB, nsX_podC,
+			nsY_podA, nsY_podB, nsY_podC,
+			nsZ_podA, nsZ_podB, nsZ_podC,
+		),
 	)
 }
 
-func (matcher *SendTrafficToMatcher) NegatedFailureMessage(actual interface{}) string {
+func (m *SendTrafficToMatcher) NegatedFailureMessage(actual interface{}) string {
 	sourcePod, ok := actual.(*corev1.Pod)
 	if !ok {
 		return "SendTrafficToMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is reachable by pod [%s/%s] on port[%s:%s], but it shouldn't be",
-		matcher.destinationPod.Namespace, matcher.destinationPod.Name,
+	return fmt.Sprintf("pod [%s/%s] is reachable by pod [%s/%s] on port[%s:%s], but it shouldn't be. \n%s",
+		m.destinationPod.Namespace, m.destinationPod.Name,
 		sourcePod.Namespace, sourcePod.Name,
-		matcher.protocol, matcher.destinationPort,
+		m.protocol, m.destinationPort,
+		printConnectivityMatrix(m.destinationPort, m.protocol,
+			nsX_podA, nsX_podB, nsX_podC,
+			nsY_podA, nsY_podB, nsY_podC,
+			nsZ_podA, nsZ_podB, nsZ_podC,
+		),
 	)
 }
 
@@ -773,14 +900,17 @@ type connectivityPair struct {
 	value bool
 }
 
-func printConnectivityMatrix(pods ...*corev1.Pod) {
+func printConnectivityMatrix(destinationPort string, protocol corev1.Protocol, pods ...*corev1.Pod) string {
 
-	data := make(chan connectivityPair)
+	data := make(chan connectivityPair, 81)
 
 	connectivityMatrix := make(map[*corev1.Pod]map[*corev1.Pod]bool)
+
+	var conversionWG sync.WaitGroup
+	conversionWG.Add(1)
 	go func() {
+		defer conversionWG.Done()
 		for k := range data {
-			//			fmt.Println(k)
 			from, ok := connectivityMatrix[k.from]
 			if !ok {
 				from = make(map[*corev1.Pod]bool)
@@ -790,68 +920,65 @@ func printConnectivityMatrix(pods ...*corev1.Pod) {
 		}
 	}()
 
-	var wg sync.WaitGroup
+	var producerWG sync.WaitGroup
 
 	for _, source := range pods {
 		for _, destination := range pods {
-			wg.Add(1)
+			producerWG.Add(1)
 			d := destination
 			s := source
 			go func() {
-				defer wg.Done()
+				defer producerWG.Done()
 				//connectivityStr := "-"
 				if s == nil || d == nil {
 					return
 				}
-				canReach, err := canSendTraffic(s, d, port5555.String(), protoTCP) // TODO
+				canReach, err := canSendTraffic(s, d, destinationPort, protocol) // TODO
 				if err != nil {
 					fmt.Println(err.Error())
 				}
-				//if err == nil && canReach {
-				//	connectivityStr = "X"
-				//}
-				/*k := fmt.Sprintf("%s/%s -> %s/%s : %s",
-					s.Namespace, s.Name,
-					d.Namespace, d.Name,
-					connectivityStr,
-				)*/
+
 				data <- connectivityPair{from: s, to: d, value: canReach}
 			}()
 		}
 	}
 
-	wg.Wait()
+	producerWG.Wait()
 	close(data)
+	conversionWG.Wait()
+
+	ret := fmt.Sprintf("Reachability matrix of %d pods on %s:%s (X = true, . = false)\n", len(pods), protocol, destinationPort)
 
 	for _, destination := range pods {
-		fmt.Printf("\t%s", shortName(destination))
+		ret += fmt.Sprintf("\t%s", shortName(destination))
 	}
-	fmt.Println()
+	ret += "\n"
 
 	for _, source := range pods {
-		fmt.Printf("%s", shortName(source))
+		ret += fmt.Sprintf("%s", shortName(source))
 		from, ok := connectivityMatrix[source]
 		if !ok {
-			fmt.Println()
+			ret += "\n"
 			continue
 		}
 		for _, destination := range pods {
-			fmt.Printf("\t")
+			ret += "\t"
 			canReach, ok := from[destination]
 			if !ok {
-				fmt.Printf("?")
+				ret += "?"
 				continue
 			}
 			if canReach {
-				fmt.Printf("X")
+				ret += "X"
 				continue
 			}
 
-			fmt.Printf(".")
+			ret += "."
 		}
-		fmt.Println()
+		ret += "\n"
 	}
 
+	return ret
 }
 
 func shortName(p *corev1.Pod) string {
@@ -870,4 +997,18 @@ func shortName(p *corev1.Pod) string {
 		podLabel = "?"
 	}
 	return ns + "/" + podLabel
+}
+
+func appendIfNotPresent(input []multinetpolicyv1.MultiPolicyType, newElement multinetpolicyv1.MultiPolicyType) []multinetpolicyv1.MultiPolicyType {
+	for _, e := range input {
+		if e == newElement {
+			return input
+		}
+	}
+
+	return append(input, newElement)
+}
+
+func eventually30s(actual interface{}) AsyncAssertion {
+	return Eventually(actual, "30s", "1s")
 }
