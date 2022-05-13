@@ -53,8 +53,6 @@ var port6666 intstr.IntOrString = intstr.FromInt(6666)
 var protoTCP corev1.Protocol = corev1.ProtocolTCP
 var protoUDP corev1.Protocol = corev1.ProtocolUDP
 
-//protoTCP := v1.ProtocolTCP
-
 // TODO - remove this: https://github.com/kubernetes/kubernetes/blob/master/test/e2e/network/netpol/network_policy.go
 
 var nsX_podA, nsX_podB, nsX_podC *corev1.Pod
@@ -133,15 +131,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		// TODO clean up
 
 		if CurrentGinkgoTestDescription().Failed {
-			// printConnectivityMatrix(
-			// 	nsX_podA, nsX_podB, nsX_podC,
-			// 	nsY_podA, nsY_podB, nsY_podC,
-			// 	nsZ_podA, nsZ_podB, nsZ_podC,
-			// )
 
-			fmt.Println("Debug ...")
-			fmt.Scanln()
-			// time.Sleep(1 * time.Hour)
+			// fmt.Println("Debug ...")
+			// fmt.Scanln()
 		}
 
 	})
@@ -499,8 +491,6 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	It("Allow access only to a specific port/protocol", func() {
 
-		Skip("WIP")
-
 		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
 			WithPodSelector(metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -515,6 +505,13 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 					Port:     &port6666,
 					Protocol: &protoUDP,
 				}},
+				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+					PodSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"pod": "b",
+						},
+					},
+				}},
 			}),
 			CreateInNamespace(nsX),
 		)
@@ -528,7 +525,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
 	})
 
-	It("Allow access only to a specific UDP protocol", func() {
+	It("Allow access only to a specific UDP port from any pod", func() {
+
+		Skip("Rules with Port selector and without From are not supported")
 
 		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
 			WithPodSelector(metav1.LabelSelector{
@@ -590,6 +589,8 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 	pods.RedefineWithLabel(podA, "pod", "a")
 	pods.RedefinePodWithNetwork(podA, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServers(podA)
+	_, err := pods.RedefineAsPrivileged(podA, "")
+	Expect(err).To(BeNil())
 	podA.ObjectMeta.GenerateName = "testpod-a-"
 	podA = createAndStartPod(podA)
 
@@ -597,6 +598,8 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 	pods.RedefineWithLabel(podB, "pod", "b")
 	pods.RedefinePodWithNetwork(podB, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServers(podB)
+	_, err = pods.RedefineAsPrivileged(podB, "")
+	Expect(err).To(BeNil())
 	podB.ObjectMeta.GenerateName = "testpod-b-"
 	podB = createAndStartPod(podB)
 
@@ -604,6 +607,8 @@ func createPodsInNamespace(namespace string) (*corev1.Pod, *corev1.Pod, *corev1.
 	pods.RedefineWithLabel(podC, "pod", "c")
 	pods.RedefinePodWithNetwork(podC, testsNetworkNamespace+"/"+testNetwork)
 	redefineWithNetcatServers(podC)
+	_, err = pods.RedefineAsPrivileged(podC, "")
+	Expect(err).To(BeNil())
 	podC.ObjectMeta.GenerateName = "testpod-c-"
 	podC = createAndStartPod(podC)
 
