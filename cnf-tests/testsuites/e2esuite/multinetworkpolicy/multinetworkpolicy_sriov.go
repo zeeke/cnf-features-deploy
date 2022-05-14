@@ -3,6 +3,7 @@ package multinetworkpolicy
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
@@ -138,7 +139,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	})
 
-	Context("", func() {
+	Context("Basic selector", func() {
 		It("DENY all traffic to a pod", func() {
 
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
@@ -318,8 +319,8 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 		It("ALLOW traffic to nsX_podA only from (namespace IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
 
-			Skip("LabelSelectorwith multiple In values is not yet supported by multi-networkpolicy-iptables")
-			//			E0511 14:37:07.698115       1 policyrules.go:238] pod selector: operator "In" without a single value cannot be converted into the old label selector format
+			//Skip("LabelSelectorwith multiple In values is not yet supported by multi-networkpolicy-iptables")
+			//	E0511 14:37:07.698115       1 policyrules.go:238] pod selector: operator "In" without a single value cannot be converted into the old label selector format
 
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
 				WithPodSelector(metav1.LabelSelector{
@@ -364,193 +365,264 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 		})
 	})
 
-	It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (nsY/* OR */podB)]", func() {
+	Context("Stacked policies", func() {
 
-		Skip("Stacked policies are not yet supported")
+		It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (nsY/* OR */podB)]", func() {
 
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
-					PodSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{{
-							Key:      "pod",
-							Operator: metav1.LabelSelectorOpIn,
-							Values:   []string{"b"},
-						}},
+			//Skip("Stacked policies are not yet supported")
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
 					},
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "pod",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"b"},
+							}},
+						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
 
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
-					NamespaceSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{{
-							Key:      "kubernetes.io/metadata.name",
-							Operator: metav1.LabelSelectorOpIn,
-							Values:   []string{nsY},
-						}},
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
 					},
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "kubernetes.io/metadata.name",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{nsY},
+							}},
+						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
 
-		// Allowed
-		eventually30s(nsX_podA).Should(Reach(nsY_podA))
-		eventually30s(nsX_podA).Should(Reach(nsY_podB))
-		eventually30s(nsX_podA).Should(Reach(nsY_podC))
+			// Allowed
+			eventually30s(nsX_podA).Should(Reach(nsY_podA))
+			eventually30s(nsX_podA).Should(Reach(nsY_podB))
+			eventually30s(nsX_podA).Should(Reach(nsY_podC))
 
-		eventually30s(nsX_podA).Should(Reach(nsZ_podB))
-		eventually30s(nsX_podA).Should(Reach(nsX_podB))
+			eventually30s(nsX_podA).Should(Reach(nsZ_podB))
+			eventually30s(nsX_podA).Should(Reach(nsX_podB))
 
-		// Not allowed
-		eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
-		eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
+			// Not allowed
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
 
-		eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
+		})
+
+		It("enforce multiple stacked policies with overlapping selector and different ports (*/podB ==> nsX/podA:5555 , */podC ==> nsX/podA:6666)", func() {
+
+			//Skip("Stacked policies are not yet supported")
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
+						},
+					}},
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port5555,
+						Protocol: &protoTCP,
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "c",
+							},
+						},
+					}},
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port6666,
+						Protocol: &protoTCP,
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
+
+			// Allowed
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+			eventually30s(nsY_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+			eventually30s(nsZ_podB).Should(Reach(nsX_podA, OnPort(port5555)))
+
+			eventually30s(nsX_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+			eventually30s(nsY_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+			eventually30s(nsZ_podC).Should(Reach(nsX_podA, OnPort(port6666)))
+
+			// Not allowed
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+			eventually30s(nsY_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+			eventually30s(nsZ_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
+
+			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
+			eventually30s(nsY_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
+			eventually30s(nsZ_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
+		})
 	})
 
-	It("enforce multiple stacked policies with overlapping selector and different ports (*/podB ==> nsX/podA:5555 , */podC ==> nsX/podA:6666)", func() {
+	Context("Ports/Protocol", func() {
+		It("Allow access only to a specific port/protocol TCP", func() {
 
-		Skip("Stacked policies are not yet supported")
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
-					PodSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"pod": "b",
-						},
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
 					},
-				}},
-				Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
-					Port:     &port5555,
-					Protocol: &protoTCP,
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
-
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
-					PodSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"pod": "c",
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port5555, // Default protocol: TCP
+						Protocol: &protoTCP,
+					}},
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
 						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
+
+			// Allowed
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555), ViaTCP))
+
+			// Not allowed
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaUDP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
+		})
+
+		It("Allow access only to a specific port/protocol UDP", func() {
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
 					},
-				}},
-				Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
-					Port:     &port6666,
-					Protocol: &protoTCP,
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
-
-		// Allowed
-		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555)))
-		eventually30s(nsY_podB).Should(Reach(nsX_podA, OnPort(port5555)))
-		eventually30s(nsZ_podB).Should(Reach(nsX_podA, OnPort(port5555)))
-
-		eventually30s(nsX_podC).Should(Reach(nsX_podA, OnPort(port6666)))
-		eventually30s(nsY_podC).Should(Reach(nsX_podA, OnPort(port6666)))
-		eventually30s(nsZ_podC).Should(Reach(nsX_podA, OnPort(port6666)))
-
-		// Not allowed
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
-		eventually30s(nsY_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
-		eventually30s(nsZ_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666)))
-
-		eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
-		eventually30s(nsY_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
-		eventually30s(nsZ_podC).ShouldNot(Reach(nsX_podA, OnPort(port5555)))
-	})
-
-	It("Allow access only to a specific port/protocol", func() {
-
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
-					Port:     &port5555, // Default protocol: TCP
-					Protocol: &protoTCP,
-				}, {
-					Port:     &port6666,
-					Protocol: &protoUDP,
-				}},
-				From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
-					PodSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"pod": "b",
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port6666,
+						Protocol: &protoUDP,
+					}},
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
 						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
+
+			// Allowed
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
+
+			// Not allowed
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaTCP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
+		})
+
+		It("Allow access only to a specific port/protocol TCP+UDP", func() {
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
 					},
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port5555, // Default protocol: TCP
+						Protocol: &protoTCP,
+					}, {
+						Port:     &port6666,
+						Protocol: &protoUDP,
+					}},
+					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
+						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
 
-		// Allowed
-		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555), ViaTCP))
-		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
+			// Allowed
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port5555), ViaTCP))
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
 
-		// Not allowed
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
-	})
+			// Not allowed
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
+		})
 
-	It("Allow access only to a specific UDP port from any pod", func() {
+		It("Allow access only to a specific UDP port from any pod", func() {
 
-		Skip("Rules with Port selector and without From are not supported")
+			//Skip("Rules with Port selector and without From are not supported")
 
-		makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-			WithPodSelector(metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"pod": "a",
-				},
-			}),
-			WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
-				Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
-					Port:     &port6666,
-					Protocol: &protoUDP,
-				}},
-			}),
-			CreateInNamespace(nsX),
-		)
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
+					Ports: []multinetpolicyv1.MultiNetworkPolicyPort{{
+						Port:     &port6666,
+						Protocol: &protoUDP,
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
 
-		// Allowed
-		eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
+			// Allowed
+			eventually30s(nsX_podB).Should(Reach(nsX_podA, OnPort(port6666), ViaUDP))
 
-		// Not allowed
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaTCP))
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
-		eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
+			// Not allowed
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaTCP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port5555), ViaUDP))
+			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
+		})
 	})
 })
 
@@ -685,7 +757,7 @@ func redefineWithNetcatServers(pod *corev1.Pod) *corev1.Pod {
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 		Name:    "netcat-udp-server-5555",
 		Image:   images.For(images.TestUtils),
-		Command: []string{"nc", "--keep-open", "--udp", "--exec", "/bin/cat", "--listen", "0.0.0.0", "5555"}})
+		Command: []string{"nc", "--keep-open", "--udp", "--sh-exec", "/bin/cat >&2", "--listen", "0.0.0.0", "5555"}})
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 		Name:    "netcat-tcp-server-6666",
 		Image:   images.For(images.TestUtils),
@@ -693,7 +765,7 @@ func redefineWithNetcatServers(pod *corev1.Pod) *corev1.Pod {
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
 		Name:    "netcat-udp-server-6666",
 		Image:   images.For(images.TestUtils),
-		Command: []string{"nc", "--keep-open", "--udp", "--exec", "/bin/cat", "--listen", "0.0.0.0", "6666"}})
+		Command: []string{"nc", "--keep-open", "--udp", "--sh-exec", "/bin/cat >&2", "--listen", "0.0.0.0", "6666"}})
 	return pod
 }
 
@@ -767,15 +839,23 @@ func (m *ReachMatcher) FailureMessage(actual interface{}) string {
 		return "ReachMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is not reachable by pod [%s/%s] on port[%s:%s], but it should be. \n%s",
-		m.destinationPod.Namespace, m.destinationPod.Name,
-		sourcePod.Namespace, sourcePod.Name,
+	return fmt.Sprintf(`pod [%s/%s %s] is not reachable by pod [%s/%s %s] on port[%s:%s], but it should be.
+%s
+Destination iptables:
+%s
+-----
+Source iptables:
+%s`,
+		m.destinationPod.Namespace, m.destinationPod.Name, getFirstSriovNicIP(m.destinationPod),
+		sourcePod.Namespace, sourcePod.Name, getFirstSriovNicIP(sourcePod),
 		m.protocol, m.destinationPort,
 		printConnectivityMatrix(m.destinationPort, m.protocol,
 			nsX_podA, nsX_podB, nsX_podC,
 			nsY_podA, nsY_podB, nsY_podC,
 			nsZ_podA, nsZ_podB, nsZ_podC,
 		),
+		getIPTables(m.destinationPod),
+		getIPTables(sourcePod),
 	)
 }
 
@@ -785,15 +865,23 @@ func (m *ReachMatcher) NegatedFailureMessage(actual interface{}) string {
 		return "ReachMatcher should be used against v1.Pod objects"
 	}
 
-	return fmt.Sprintf("pod [%s/%s] is reachable by pod [%s/%s] on port[%s:%s], but it shouldn't be. \n%s",
-		m.destinationPod.Namespace, m.destinationPod.Name,
-		sourcePod.Namespace, sourcePod.Name,
+	return fmt.Sprintf(`pod [%s/%s %s] is reachable by pod [%s/%s %s] on port[%s:%s], but it shouldn't be.
+%s
+Destination iptables:
+%s
+-----
+Source iptables:
+%s`,
+		m.destinationPod.Namespace, m.destinationPod.Name, getFirstSriovNicIP(m.destinationPod),
+		sourcePod.Namespace, sourcePod.Name, getFirstSriovNicIP(sourcePod),
 		m.protocol, m.destinationPort,
 		printConnectivityMatrix(m.destinationPort, m.protocol,
 			nsX_podA, nsX_podB, nsX_podC,
 			nsY_podA, nsY_podB, nsY_podC,
 			nsZ_podA, nsZ_podB, nsZ_podC,
 		),
+		getIPTables(m.destinationPod),
+		getIPTables(sourcePod),
 	)
 }
 
@@ -812,22 +900,51 @@ func canSendTraffic(sourcePod, destinationPod *corev1.Pod, destinationPort strin
 		protocolArg = "--udp"
 	}
 
-	output, err := pods.ExecCommand(client.Client, *sourcePod, []string{"bash", "-c", fmt.Sprintf("echo xxx | nc -w 3 %s %s %s", protocolArg, destinationIps[0], destinationPort)})
+	saltString := fmt.Sprintf("%d", rand.Intn(1000000)+1000000)
+
+	output, err := pods.ExecCommand(
+		client.Client,
+		*sourcePod,
+		[]string{
+			"bash", "-c",
+			fmt.Sprintf("echo %s %s-%s:%s%s | nc -w 3 %s %s %s",
+				saltString,
+				getFirstSriovNicIP(sourcePod),
+				destinationIps[0],
+				destinationPort,
+				protocol,
+				protocolArg,
+				destinationIps[0],
+				destinationPort,
+			),
+		})
+
 	if err != nil {
 		if protocol == corev1.ProtocolTCP && strings.Contains(output.String(), "Ncat: Connection timed out") {
-			// Timeout error is symptom of no
+			// Timeout error is symptom of no connection
 			return false, nil
 		}
 
 		if protocol == corev1.ProtocolUDP && strings.Contains(output.String(), "Ncat: Connection refused") {
-			// Connection refused may occur when many pods
 			return false, nil
 		}
 
 		return false, fmt.Errorf("can't connect pods [%s] -> [%s]: %w ", sourcePod.Name, destinationPod.Name, err)
 	}
 
-	return true, nil
+	destinationContainerName := fmt.Sprintf("netcat-%s-server-%s", strings.ToLower(string(protocol)), destinationPort)
+	destinationLogs, err := pods.GetLogForContainer(
+		destinationPod,
+		destinationContainerName,
+	)
+	if err != nil {
+		return false, fmt.Errorf("can't get destination pod logs [%s/%s]: %w ", destinationPod.Name, destinationContainerName, err)
+	}
+
+	if strings.Contains(destinationLogs, saltString) {
+		return true, nil
+	}
+	return false, nil
 }
 
 // printConnectivityMatrix returns a string representation of the connectivity matrix between
@@ -962,4 +1079,26 @@ func appendIfNotPresent(input []multinetpolicyv1.MultiPolicyType, newElement mul
 
 func eventually30s(actual interface{}) AsyncAssertion {
 	return Eventually(actual, "30s", "1s")
+}
+
+func getFirstSriovNicIP(pod *corev1.Pod) string {
+	ips, err := network.GetSriovNicIPs(pod, "net1")
+	if err != nil {
+		return "<err: " + err.Error() + ">"
+	}
+
+	if len(ips) == 0 {
+		return "<no IP>"
+	}
+
+	return ips[0]
+}
+
+func getIPTables(pod *corev1.Pod) string {
+	output, err := pods.ExecCommand(client.Client, *pod, []string{"iptables", "-L", "-v", "-n"})
+	if err != nil {
+		return "<err: " + err.Error() + ">"
+	}
+
+	return output.String()
 }
