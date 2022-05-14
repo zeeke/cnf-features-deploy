@@ -319,7 +319,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 		It("ALLOW traffic to nsX_podA only from (namespace IN {nsY, nsZ} AND pod IN {podB, podC})", func() {
 
-			//Skip("LabelSelectorwith multiple In values is not yet supported by multi-networkpolicy-iptables")
+			Skip("LabelSelectorwith multiple In values is not yet supported by multi-networkpolicy-iptables")
 			//	E0511 14:37:07.698115       1 policyrules.go:238] pod selector: operator "In" without a single value cannot be converted into the old label selector format
 
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
@@ -369,7 +369,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 		It("enforce multiple stacked policies with overlapping selector [nsX_podA <=> (nsY/* OR */podB)]", func() {
 
-			//Skip("Stacked policies are not yet supported")
+			Skip("Stacked policies are not yet supported")
 
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
 				WithPodSelector(metav1.LabelSelector{
@@ -380,11 +380,9 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
 					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
 						PodSelector: &metav1.LabelSelector{
-							MatchExpressions: []metav1.LabelSelectorRequirement{{
-								Key:      "pod",
-								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{"b"},
-							}},
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
 						},
 					}},
 				}),
@@ -400,35 +398,35 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 				WithIngressRule(multinetpolicyv1.MultiNetworkPolicyIngressRule{
 					From: []multinetpolicyv1.MultiNetworkPolicyPeer{{
 						NamespaceSelector: &metav1.LabelSelector{
-							MatchExpressions: []metav1.LabelSelectorRequirement{{
-								Key:      "kubernetes.io/metadata.name",
-								Operator: metav1.LabelSelectorOpIn,
-								Values:   []string{nsY},
-							}},
+							MatchLabels: map[string]string{
+								"kubernetes.io/metadata.name": nsY,
+							},
 						},
 					}},
 				}),
 				CreateInNamespace(nsX),
 			)
 
-			// Allowed
-			eventually30s(nsX_podA).Should(Reach(nsY_podA))
-			eventually30s(nsX_podA).Should(Reach(nsY_podB))
-			eventually30s(nsX_podA).Should(Reach(nsY_podC))
+			// Allowed all connection from nsY
+			eventually30s(nsY_podA).Should(Reach(nsX_podA))
+			eventually30s(nsY_podB).Should(Reach(nsX_podA))
+			eventually30s(nsY_podC).Should(Reach(nsX_podA))
 
-			eventually30s(nsX_podA).Should(Reach(nsZ_podB))
-			eventually30s(nsX_podA).Should(Reach(nsX_podB))
+			// Allowed all connection from podB
+			eventually30s(nsZ_podB).Should(Reach(nsX_podA))
+			eventually30s(nsX_podB).Should(Reach(nsX_podA))
 
 			// Not allowed
-			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
-			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podC))
+			eventually30s(nsZ_podA).ShouldNot(Reach(nsX_podA))
+			eventually30s(nsZ_podC).ShouldNot(Reach(nsX_podA))
 
-			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
+			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
 		})
 
 		It("enforce multiple stacked policies with overlapping selector and different ports (*/podB ==> nsX/podA:5555 , */podC ==> nsX/podA:6666)", func() {
 
-			//Skip("Stacked policies are not yet supported")
+			Skip("Stacked policies are not yet supported")
+
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
 				WithPodSelector(metav1.LabelSelector{
 					MatchLabels: map[string]string{
