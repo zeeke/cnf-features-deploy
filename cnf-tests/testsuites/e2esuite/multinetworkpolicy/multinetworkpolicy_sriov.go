@@ -139,7 +139,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 	})
 
-	Context("Basic selector", func() {
+	Context("Ingress", func() {
 		It("DENY all traffic to a pod", func() {
 
 			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
@@ -158,32 +158,6 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			// Pod A should not be reacheable by B and C
 			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA))
 			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
-
-			// nsX_podA should be able to send traffic to
-			// eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
-		})
-
-		It("DENY all traffic to a pod", func() {
-
-			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
-				WithPodSelector(metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"pod": "a",
-					},
-				}),
-				WithEmptyIngressRules(),
-				CreateInNamespace(nsX),
-			)
-
-			// Pod B and C are not affected by the policy
-			eventually30s(nsX_podB).Should(Reach(nsX_podC))
-
-			// Pod A should not be reacheable by B and C
-			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA))
-			eventually30s(nsX_podC).ShouldNot(Reach(nsX_podA))
-
-			// nsX_podA should be able to send traffic to
-			// eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
 		})
 
 		It("DENY all traffic to/from/in a namespace", func() {
@@ -362,6 +336,57 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 
 			eventually30s(nsX_podA).ShouldNot(Reach(nsY_podA))
 			eventually30s(nsX_podA).ShouldNot(Reach(nsZ_podA))
+		})
+	})
+
+	Context("Egress", func() {
+
+		It("DENY all traffic from a pod", func() {
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithEmptyEgressRules(),
+				CreateInNamespace(nsX),
+			)
+
+			// Pod B and C are not affected by the policy
+			eventually30s(nsX_podB).Should(Reach(nsX_podC))
+
+			// Pod A should not be reacheable by B and C
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podB))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podB))
+		})
+
+		It("ALLOW traffic to nsX_podA only from nsX_podB", func() {
+
+			makeMultiNetworkPolicy(testsNetworkNamespace+"/"+testNetwork,
+				WithPodSelector(metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"pod": "a",
+					},
+				}),
+				WithEgressRule(multinetpolicyv1.MultiNetworkPolicyEgressRule{
+					To: []multinetpolicyv1.MultiNetworkPolicyPeer{{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"pod": "b",
+							},
+						},
+					}},
+				}),
+				CreateInNamespace(nsX),
+			)
+
+			// The subject of test case
+			eventually30s(nsX_podA).Should(Reach(nsX_podB))
+			eventually30s(nsX_podA).ShouldNot(Reach(nsX_podC))
+
+			// Traffic that should not be affected
+			eventually30s(nsX_podB).Should(Reach(nsX_podC))
 		})
 	})
 
@@ -622,6 +647,7 @@ var _ = Describe("[multinetworkpolicy] [sriov] integration", func() {
 			eventually30s(nsX_podB).ShouldNot(Reach(nsX_podA, OnPort(port6666), ViaTCP))
 		})
 	})
+
 })
 
 func cleanPodsInNamespaces(argNamespaces ...string) {
@@ -716,6 +742,20 @@ func WithIngressRule(rule multinetpolicyv1.MultiNetworkPolicyIngressRule) MultiN
 	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
 		pol.Spec.PolicyTypes = appendIfNotPresent(pol.Spec.PolicyTypes, multinetpolicyv1.PolicyTypeIngress)
 		pol.Spec.Ingress = append(pol.Spec.Ingress, rule)
+	}
+}
+
+func WithEmptyEgressRules() MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		pol.Spec.PolicyTypes = appendIfNotPresent(pol.Spec.PolicyTypes, multinetpolicyv1.PolicyTypeEgress)
+		pol.Spec.Egress = []multinetpolicyv1.MultiNetworkPolicyEgressRule{}
+	}
+}
+
+func WithEgressRule(rule multinetpolicyv1.MultiNetworkPolicyEgressRule) MultiNetworkPolicyOpt {
+	return func(pol *multinetpolicyv1.MultiNetworkPolicy) {
+		pol.Spec.PolicyTypes = appendIfNotPresent(pol.Spec.PolicyTypes, multinetpolicyv1.PolicyTypeEgress)
+		pol.Spec.Egress = append(pol.Spec.Egress, rule)
 	}
 }
 
