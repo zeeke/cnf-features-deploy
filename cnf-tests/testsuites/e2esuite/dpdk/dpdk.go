@@ -17,6 +17,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/ptr"
@@ -421,7 +422,29 @@ sleep INF
 					`dpdk-testpmd --vdev=virtio_user0,path=/dev/vhost-net,queues=2,queue_size=1024,iface=%s -a ${PCIDEVICE_OPENSHIFT_IO_%s} -- --stats-period 5
 							sleep INF`, tapIface, strings.ToUpper(dpdkResource1))
 				p = pods.DefineDPDKWorkload(nodeSelector, rxCommand, images.For(images.Dpdk), nil, performanceprofile.HugePageSize)
-				rxPod, err := pods.CreateAndStart(pods.RedefineWithRestrictedPrivileges(pods.RedefinePodWithNetwork(p, netAnnotationPodRX)))
+				p = pods.RedefineWithRestrictedPrivileges(pods.RedefinePodWithNetwork(p, netAnnotationPodRX))
+				p.Spec.Containers = append(p.Spec.Containers, corev1.Container{
+					Name:    "tcp-dump",
+					Image:   "registry.hub.docker.com/corfr/tcpdump",
+					Command: []string{"tcpdump", "-i", "tap23.200", "-nn"},
+					SecurityContext: &corev1.SecurityContext{
+						RunAsUser: ptr.To[int64](0),
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{"IPC_LOCK", "SYS_RESOURCE", "NET_RAW"},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Limits: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+							corev1.ResourceCPU:    resource.MustParse("500m"),
+						},
+						Requests: map[corev1.ResourceName]resource.Quantity{
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
+							corev1.ResourceCPU:    resource.MustParse("500m"),
+						},
+					},
+				})
+				rxPod, err := pods.CreateAndStart(p)
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(func() string {
@@ -454,11 +477,11 @@ sleep INF
 				}, 8*time.Minute, 1*time.Second).Should(BeNumerically(">", 0))
 
 				By("Checking the rx output of vlan 200 subinterface")
-				Eventually(func() int {
+				Consistently(func() int {
 					bytes, err := getDeviceRXBytes(rxPod, tapVlanIface200)
 					Expect(err).ToNot(HaveOccurred())
 					return bytes
-				}, 8*time.Minute, 1*time.Second).Should(BeNumerically("==", 0))
+				}, 8*time.Minute, 20*time.Second).Should(BeNumerically("==", 0))
 			})
 		})
 	})
@@ -1220,6 +1243,7 @@ func getDeviceRXBytes(pod *corev1.Pod, device string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("command %v error: %w", statsCommand, err)
 	}
+	fmt.Printf("%v\n%s\n\n", statsCommand, &stats)
 	statsLines := strings.Split(stats.String(), "\n")
 	for i, line := range statsLines {
 		if strings.Contains(strings.Trim(line, " "), "RX:") {
